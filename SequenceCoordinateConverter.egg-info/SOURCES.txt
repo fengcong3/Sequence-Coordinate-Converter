@@ -1,3 +1,4 @@
+LICENSE
 README.md
 setup.py
 SequenceCoordinateConverter.egg-info/PKG-INFO
@@ -8,9 +9,9 @@ SequenceCoordinateConverter.egg-info/requires.txt
 SequenceCoordinateConverter.egg-info/top_level.txt
 scc/__init__.py
 scc/arg_parser.py
-scc/genome1_processor.py
 scc/main.py
 scc/output_handler.py
-scc/genome2_processor_cext/bri_get.c
-scc/genome2_processor_cext/bri_index.c
-scc/genome2_processor_cext/py_bri_wrapper.c
+scc/read_pos_resolver.py
+scc/bri/bri_get.c
+scc/bri/bri_index.c
+scc/bri/py_bri_wrapper.c

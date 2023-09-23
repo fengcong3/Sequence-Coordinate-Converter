@@ -4,9 +4,9 @@ from setuptools import setup, Extension, find_packages
 genome2_processor_cext = Extension(
     'bri',  # name of the extension
     sources=[
-        'scc/genome2_processor_cext/bri_get.c',
-        'scc/genome2_processor_cext/bri_index.c',
-        'scc/genome2_processor_cext/py_bri_wrapper.c'  # include the wrapper
+        'scc/bri/bri_get.c',
+        'scc/bri/bri_index.c',
+        'scc/bri/py_bri_wrapper.c'  # include the wrapper
     ],  # source files
     extra_compile_args=[
         '-O3',
@@ -18,7 +18,8 @@ genome2_processor_cext = Extension(
     ],
     extra_link_args=[
         '-L/public/home/fengcong/anaconda2/lib/',
-        '-fPIC'
+        '-fPIC',
+        '-L/public/agis/chengshifeng_group/fengcong/WGRS/software/htslib-1.18/install_08284/lib/'
     ],
     include_dirs=[
         '/public/agis/chengshifeng_group/fengcong/WGRS/software/htslib-1.18/install_08284/include/',
