@@ -10,7 +10,7 @@ def get_new_reference_position(read, pos_in_read):
 
     # If the read is reverse complemented, adjust pos_in_read
     if read.is_reverse:
-        pos_in_read = read.query_length - pos_in_read - 1
+        pos_in_read = read.query_length - pos_in_read +1
 
     for op, length in cigar_tuples:
         if op in [0, 7, 8]:  # M, =, X
@@ -32,13 +32,17 @@ def get_new_reference_position(read, pos_in_read):
     return None
 
 ## 根据read name 来获取新的位置
-## @reture reads_dict: {(read_name, R1/R2): [read_pos, chr, new_ref_pos], ...}
-def get_new_pos_by_readname(bam2_path, bri_instance, reads_name):
+## @reture reads_dict: {(read_name, R1/R2): [read_pos,ref1_base,read_base, chr, new_ref_pos,ref2_base, read_base], ...}
+def get_new_pos_by_readname(bam2_path, ref2, bri_instance, reads_name):
     ## 将其转为字典，read name 和 R1、R2 作为key，pos 作为value
-    reads_dict = {(tuple(x[0:2])): [x[2],] for x in reads_name}
+    reads_dict = {(tuple(x[0:2])): x[2:] for x in reads_name}
 
     ## 获取reads_name的第一个字段，为read name
     read_names_for_bri = list(set([x[0] for x in reads_name]))
+
+    ## 打开参考基因组文件
+    fasta = pysam.FastaFile(ref2)
+    
 
     ## sam format text
     resulte = bri.query_by_readname(bam2_path, bri_instance, read_names_for_bri)
@@ -59,9 +63,14 @@ def get_new_pos_by_readname(bam2_path, bri_instance, reads_name):
                 pos = reads_dict[(read_name, r1_or_r2)][0]
                 # Compute the chromosome and position in the new reference sequence
                 chromosome = read.reference_name
-                new_ref_pos = get_new_reference_position(read, pos)  # 1-based
+                new_ref_pos = get_new_reference_position(read, pos)  # pos:1-based
+                # 获取某个染色体(chr1)上第1000个位置（0-based）的碱基
+                ref_base_at_position = fasta.fetch(chromosome, new_ref_pos-1, new_ref_pos).upper()
+                read_base_at_position = read.query_sequence[pos-1].upper() if not read.is_reverse else read.query_sequence[read.query_length - pos ].upper()
                 reads_dict[(read_name, r1_or_r2)].append(chromosome)
                 reads_dict[(read_name, r1_or_r2)].append(new_ref_pos)
+                reads_dict[(read_name, r1_or_r2)].append(ref_base_at_position)
+                reads_dict[(read_name, r1_or_r2)].append(read_base_at_position)
 
     os.remove(temp_path)
 

@@ -1,6 +1,8 @@
 import pysam
-# import sys
 
+def complement(base):
+    comp_dict = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+    return comp_dict.get(base.upper(), 'N')  # 返回'N'如果输入是无效的碱基
 
 def get_read_position_in_reference1(read, ref_pos):
     # start position of the read in reference
@@ -12,7 +14,7 @@ def get_read_position_in_reference1(read, ref_pos):
         return None
 
     ref_cursor = start
-    read_cursor = 0 if not read.is_reverse else read.query_length - 1
+    read_cursor = 0 if not read.is_reverse else read.query_length +1
 
     for op, length in read.cigar:
         # 'M' operation
@@ -44,23 +46,26 @@ def get_read_position_in_reference1(read, ref_pos):
 ## @param bam_file_path: bam file path
 ## @param ref1: reference 1
 ## @param pos:  chr1A_part1:100
-## @return: [[read_name, R1/R2, read_pos], ...]
+## @return: [[read_name, R1/R2, read_pos, ref_base, read_base], ...]
 def get_reads_by_pos(bam_file_path, ref1, pos):
     # 根据文件类型选择打开模式
     mode = "rb" if bam_file_path.endswith( ".bam" )  else "rc"
-
-    # 可选：对于CRAM，指定参考基因组
-    reference_file = ref1 if bam_file_path.endswith( ".cram" )  else None
 
     # 处理pos
     chr, pos = pos.split(":")
     pos = int(pos)
 
+    
+    ## 打开参考基因组
+    fasta = pysam.FastaFile(ref1)
+    # 获取某个染色体(chr1)上第1000个位置（0-based）的碱基
+    ref_base_at_position = fasta.fetch(chr, pos-1, pos).upper()
+    
     # 定义返回值
     reads = []
 
     # 打开文件
-    with pysam.AlignmentFile(bam_file_path, mode, reference_filename=reference_file) as infile:
+    with pysam.AlignmentFile(bam_file_path, mode, reference_filename=ref1) as infile:
         # 遍历覆盖特定位置（例如chr1A:100-100）的reads
         # 注意：pysam的坐标是0-based，而bam文件里面是1-based
         for read in infile.fetch(chr, pos-1, pos):
@@ -68,8 +73,9 @@ def get_reads_by_pos(bam_file_path, ref1, pos):
                 read_pos = get_read_position_in_reference1(read, pos)
                 if read_pos is not None:
                     r1_or_r2 = 'R1' if read.is_read1 else 'R2'
+                    read_base_at_position = read.query_sequence[read_pos-1].upper() if not read.is_reverse else read.query_sequence[read.query_length - read_pos ].upper()
                     # print(f'{read.query_name},{r1_or_r2},{read_pos}')
-                    reads.append([read.query_name, r1_or_r2, read_pos])
+                    reads.append([read.query_name, r1_or_r2, read_pos, ref_base_at_position, read_base_at_position])
 
     return reads
             
