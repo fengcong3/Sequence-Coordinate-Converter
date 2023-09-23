@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "getopt.h": "c",
+        "bri_index.h": "c"
+    }
+}
