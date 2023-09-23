@@ -26,7 +26,7 @@ static PyObject* py_query_by_readname(PyObject *self, PyObject *args)
     PyObject *read_names_list;
     const char *input_bam;
     // const char *output_sam;
-    if (!PyArg_ParseTuple(args, "ssKO", &input_bam, &bri_ptr, &read_names_list)) {
+    if (!PyArg_ParseTuple(args, "sKO", &input_bam, &bri_ptr, &read_names_list)) {
         return NULL;
     }
     

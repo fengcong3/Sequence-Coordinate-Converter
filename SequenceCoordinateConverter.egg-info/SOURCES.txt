@@ -12,6 +12,7 @@ scc/arg_parser.py
 scc/main.py
 scc/output_handler.py
 scc/read_pos_resolver.py
+scc/ref_pos_resolver.py
 scc/bri/bri_get.c
 scc/bri/bri_index.c
 scc/bri/py_bri_wrapper.c

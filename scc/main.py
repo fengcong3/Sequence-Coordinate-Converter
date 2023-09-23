@@ -25,8 +25,8 @@ import pandas as pd
 
 from .arg_parser import get_args_and_check_file
 from .read_pos_resolver import get_reads_by_pos
+from .ref_pos_resolver import get_new_pos_by_readname, make_decision
 import bri
-import io
 
 def main():
     ## get args
@@ -37,12 +37,15 @@ def main():
     ref1="/public/agis/chengshifeng_group/fengcong/WGRS/graduation_project/00.var_genome/161010_Chinese_Spring_v1.0_pseudomolecules_parts.fasta"
     pos = "chr1B_part1:882559"
     res=get_reads_by_pos(bam_file_path, ref1, pos)
-    print(res)
+    print(res) ## 注意判断是否为空列表
 
     ## make the bri module ready, waiting for the read name that needed query
-    # bri_instance = bri.initialize_bri(args.bam2, args.bam2+".bri")
+    bam2="/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1//01.cram_of_CS2/CS/CS2.merge.sortn.bam"
+    bri_instance = bri.initialize_bri(bam2, bam2+".bri")
 
-
+    update_res = get_new_pos_by_readname(bam2, bri_instance, res)
+    final_res=make_decision(update_res)
+    print(final_res)
 
     # 假设read_names是一个Python列表
     # input_bam_path= bam_file_path

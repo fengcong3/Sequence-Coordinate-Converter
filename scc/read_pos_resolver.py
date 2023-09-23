@@ -1,5 +1,5 @@
 import pysam
-import sys
+# import sys
 
 
 def get_read_position_in_reference1(read, ref_pos):
