@@ -73,24 +73,59 @@ def get_new_pos_by_readname(bam2_path, ref2, bri_instance, reads_name):
                 reads_dict[(read_name, r1_or_r2)].append(read_base_at_position)
 
     os.remove(temp_path)
-
-
+    del(resulte)
+    # 删除没有更新的键
+    keys_to_remove = [key for key, value in reads_dict.items() if len(value) < 7]  # 假设一个完整的value应该包含8个元素
+    for key in keys_to_remove:
+        del reads_dict[key]
     # print(reads_dict)
     return reads_dict
 
 ## 根据多条reads 计算出来的新位置，来决定最终的位置
-## @param reads_dicts: {(read_name, R1/R2): [read_pos, chr, new_ref_pos], ...}
-## @return: [chr, new_ref_pos]
+## @param reads_dicts: {(read_name, R1/R2): [read_pos, ref1_base, read_base1, chr, new_ref_pos,ref2_base, read_base2], ...}
+## @return:  [ref1_base，chr，new_ref_pos，ref2_base，标识符 ]  
+## 其中标识符 0代表碱基没有发生改变，1代表两个参考基因组组装方向发生改变，变为互补碱基，2代表两个基因组组装结果不一致;3代表反方向的不一致
+## warning: 仅用了最热点的一个位置的一条read 做判断，不清楚有啥后果
 def make_decision(reads_dicts):
-    ## 返回出现最多次数的chr 和 new_ref_pos的组合
-    ## 如果出现次数相同，那么返回第一个
-    ## 如果没有，那么返回None
-    df = pd.DataFrame.from_dict(reads_dicts, orient='index', columns=['read_pos', 'chr', 'new_ref_pos'])
-    df = df.groupby(['chr', 'new_ref_pos']).size().reset_index(name='counts')
-    df = df.sort_values(by=['counts'], ascending=False)
-    if df.shape[0] == 0:
-        return None
-    else:
-        return [df.iloc[0]['chr'], df.iloc[0]['new_ref_pos']]
+    df = pd.DataFrame.from_dict(reads_dicts, orient='index', 
+                                columns=['read_pos', 'ref1_base', 'read_base1', 
+                                         'chr', 'new_ref_pos', 'ref2_base', 'read_base2'])
+                                         
+    # 对['chr', 'new_ref_pos']进行分组，并计算每组的大小
+    grouped = df.groupby(['chr', 'new_ref_pos'])
+    
+    # 获取出现次数最多的['chr', 'new_ref_pos']组合
+    most_common_group = grouped.size().idxmax()
+    filtered_df = grouped.get_group(most_common_group)
+    
+    # 初始化结果列表
+    result = [filtered_df['ref1_base'].iloc[0], most_common_group[0], most_common_group[1], filtered_df['ref2_base'].iloc[0]]
+    
+    # 判断碱基状态的改变
+    ref1_base = filtered_df['ref1_base'].iloc[0]
+    read_base1 = filtered_df['read_base1'].iloc[0]
+    ref2_base = filtered_df['ref2_base'].iloc[0]
+    read_base2 = filtered_df['read_base2'].iloc[0]
+
+    # 标识符初始化
+    identifier = 0
+
+    # 判断是否变为互补碱基
+    complement_dict = {'A': 'T', 'T': 'A', 'C': 'G', 'G': 'C'}
+    if complement_dict.get(ref1_base) == ref2_base and complement_dict.get(read_base1) == read_base2:
+        identifier = 1
+    # 基因组反向且不一致
+    elif ref1_base != ref2_base and complement_dict.get(read_base1) == read_base2:
+        identifier = 3
+    # 判断是否两个基因组组装结果不一致
+    elif ref1_base != ref2_base or read_base1 != read_base2:
+        identifier = 2
+
+    result.append(identifier)
+    
+    return result
+
+
+
 
 

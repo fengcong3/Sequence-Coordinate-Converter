@@ -16,9 +16,9 @@ def get_args_and_check_file():
     cmdparser.add_argument("-s","--snp", dest="snp",type=str, required=True,
         help="SNP position file of reference 1, format: chr1A:100, one line one SNP")
     ## thread
-    cmdparser.add_argument("-t","--thread", dest="thread",type=int, default=1,
-        help="Thread number")
-    cmdparser.add_argument("-o","--outprefix", dest="outprfix",type=str, required=True,
+    # cmdparser.add_argument("-t","--thread", dest="thread",type=int, default=1,
+    #     help="Thread number")
+    cmdparser.add_argument("-o","--outprefix", dest="outprefix",type=str, required=True,
         help="Output prefix")
     
     args = cmdparser.parse_args()

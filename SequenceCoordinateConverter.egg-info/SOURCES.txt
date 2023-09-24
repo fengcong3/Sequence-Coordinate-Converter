@@ -9,8 +9,8 @@ SequenceCoordinateConverter.egg-info/requires.txt
 SequenceCoordinateConverter.egg-info/top_level.txt
 scc/__init__.py
 scc/arg_parser.py
+scc/input_output_handler.py
 scc/main.py
-scc/output_handler.py
 scc/read_pos_resolver.py
 scc/ref_pos_resolver.py
 scc/bri/bri_get.c

@@ -21,48 +21,48 @@
 ### these reads, and we can calculate the Pos2 in reference 2 that corresponds to
 ### the Pos1 in reference 1.
 
-import pandas as pd
 
 from .arg_parser import get_args_and_check_file
 from .read_pos_resolver import get_reads_by_pos
 from .ref_pos_resolver import get_new_pos_by_readname, make_decision
+from .input_output_handler import read_SNP_file, write_res1, open_res_file, close_res_file
 import bri
+import sys
 
 def main():
     ## get args
-    # args = get_args_and_check_file()
-
-    ## read_pos_resolver.py
-    bam_file_path = "/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/00.cram_of_CS1/merge.rmdup.Chinese_Spring.cram"
-    ref1="/public/agis/chengshifeng_group/fengcong/WGRS/graduation_project/00.var_genome/161010_Chinese_Spring_v1.0_pseudomolecules_parts.fasta"
-    pos = "chr1B_part1:58917715"
-    res=get_reads_by_pos(bam_file_path, ref1, pos)
-    # print(res) ## 注意判断是否为空列表
-    for i in res:
-        print(i)
+    args = get_args_and_check_file()
 
     ## make the bri module ready, waiting for the read name that needed query
-    bam2="/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1//01.cram_of_CS2/CS/CS2.merge.sortn.bam"
-    ref2="/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/01.cram_of_CS2/CS/CS_V2.1.cut.norm.fa"
-    bri_instance = bri.initialize_bri(bam2, bam2+".bri")
+    # bam2="/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1//01.cram_of_CS2/CS/CS2.merge.sortn.bam"
+    # ref2="/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/01.cram_of_CS2/CS/CS_V2.1.cut.norm.fa"
+    bri_instance = bri.initialize_bri(args.bam2, args.bam2+".bri")
 
-    update_res = get_new_pos_by_readname(bam2, ref2, bri_instance, res)
-    ##遍历输出这个字典
-    for k,v in update_res.items():
-        print(k,v)
-    # final_res=make_decision(update_res)
-    # print(final_res)
+    outf = open_res_file(args.outprefix)
 
-    # 假设read_names是一个Python列表
-    # input_bam_path= bam_file_path
-    # read_names = ["SRR5893652.16936768", "SRR5893652.185558604" ]
-    # output_sam_path = "/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/06.small_batch_test/pipeline/zz.scctest.sam"
-    # resulte = bri.query_by_readname(input_bam_path, bri_instance, read_names)
-    # print(resulte)
+    ## get snp position
+    # snp_file = "/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/06.small_batch_test/pipeline/test.txt"
+    snp_list = read_SNP_file(args.snp)
 
-    # sam_file = io.StringIO(resulte)
+    ## traverse each SNP
+    # bam_file_path = "/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/00.cram_of_CS1/merge.rmdup.Chinese_Spring.cram"
+    # ref1="/public/agis/chengshifeng_group/fengcong/WGRS/graduation_project/00.var_genome/161010_Chinese_Spring_v1.0_pseudomolecules_parts.fasta"
+    for snp in snp_list:
+        ## get position of reads on reference1 
+        res=get_reads_by_pos(args.bam1, args.ref1, snp)
+        ## 注意判断是否为空列表,如果为空列表，就跳过
+        if len(res) == 0:
+            sys.stderr.write("No reads cover this position: %s\n" % snp)
+            continue
 
-    # # 使用 pysam 读取这个 "文件"
-    # with pysam.AlignmentFile(sam_file, "r") as samfile:
-    #     for read in samfile:
-    #         print(read)
+        ## get new position on reference2
+        update_res = get_new_pos_by_readname(args.bam2, args.ref2, bri_instance, res)
+        if len(update_res) == 0:
+            sys.stderr.write("reads cant find in ref2 or all unmmaped: %s\n" % snp)
+            continue
+
+        ## 做出判断决策
+        final_res=make_decision(update_res)
+        write_res1(snp, final_res, outf)
+
+    close_res_file(outf)
