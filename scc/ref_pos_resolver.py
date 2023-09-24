@@ -64,6 +64,13 @@ def get_new_pos_by_readname(bam2_path, ref2, bri_instance, reads_name):
                 # Compute the chromosome and position in the new reference sequence
                 chromosome = read.reference_name
                 new_ref_pos = get_new_reference_position(read, pos)  # pos:1-based
+
+                ## 会出现supplementary alignment 的情况，这种情况下，
+                ## 会有两条record，一条是主要的，一条是supplementary的
+                ## 那么有一条 就不会有位置
+                if new_ref_pos is None: ## 如果没找到位置，就跳过
+                    continue
+
                 # 获取某个染色体(chr1)上第1000个位置（0-based）的碱基
                 ref_base_at_position = fasta.fetch(chromosome, new_ref_pos-1, new_ref_pos).upper()
                 read_base_at_position = read.query_sequence[pos-1].upper() if not read.is_reverse else read.query_sequence[read.query_length - pos ].upper()

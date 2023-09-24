@@ -28,8 +28,12 @@ from .ref_pos_resolver import get_new_pos_by_readname, make_decision
 from .input_output_handler import read_SNP_file, write_res1, open_res_file, close_res_file
 import bri
 import sys
+import time
 
 def main():
+    ## 输出时间，用于计算运行时间
+    start_time = time.time()
+    sys.stderr.write("Start time: %s\n" % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time)))
     ## get args
     args = get_args_and_check_file()
 
@@ -37,6 +41,9 @@ def main():
     # bam2="/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1//01.cram_of_CS2/CS/CS2.merge.sortn.bam"
     # ref2="/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/01.cram_of_CS2/CS/CS_V2.1.cut.norm.fa"
     bri_instance = bri.initialize_bri(args.bam2, args.bam2+".bri")
+
+    ## 输出时间，用于计算运行时间
+    sys.stderr.write("BRI module ready, time: %s\n" % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
 
     outf = open_res_file(args.outprefix)
 
@@ -66,3 +73,6 @@ def main():
         write_res1(snp, final_res, outf)
 
     close_res_file(outf)
+
+    ## 输出时间，用于计算运行时间
+    sys.stderr.write("End time: %s\n" % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
