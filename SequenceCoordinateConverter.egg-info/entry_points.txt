@@ -1,3 +1,0 @@
-[console_scripts]
-SCC = scc.main:main
-
