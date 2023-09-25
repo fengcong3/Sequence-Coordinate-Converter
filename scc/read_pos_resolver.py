@@ -41,6 +41,23 @@ def get_read_position_in_reference1(read, ref_pos):
 
     return None
 
+def adjust_for_hard_clip(read, read_pos):
+    # 统计前置和后置的hard clip数量
+    hard_clip_start = 0
+    hard_clip_end = 0
+    
+    if read.cigar[0][0] == 5:
+        hard_clip_start = read.cigar[0][1]
+        
+    if read.cigar[-1][0] == 5:
+        hard_clip_end = read.cigar[-1][1]
+    
+    if  not read.is_reverse:
+        return read_pos -1 - hard_clip_start
+    else:
+        return read.query_length - read_pos + hard_clip_start
+
+
 ## 提取指定位置的reads，如果是cram 可能需要reference
 ## 然后根据 这些reads 和 参考基因组的位置，来计算在read 上的位置
 ## @param bam_file_path: bam file path
@@ -69,11 +86,23 @@ def get_reads_by_pos(bam_file_path, ref1, pos):
         # 遍历覆盖特定位置（例如chr1A:100-100）的reads
         # 注意：pysam的坐标是0-based，而bam文件里面是1-based
         for read in infile.fetch(chr, pos-1, pos):
-            if not read.is_unmapped:
+            if not read.is_unmapped and read.mapping_quality > 0 and not read.is_supplementary and "SA" not in dict(read.tags):
                 read_pos = get_read_position_in_reference1(read, pos)
-                if read_pos is not None:
+                if read_pos is not None and read_pos > 0:
                     r1_or_r2 = 'R1' if read.is_read1 else 'R2'
-                    read_base_at_position = read.query_sequence[read_pos-1].upper() if not read.is_reverse else read.query_sequence[read.query_length - read_pos ].upper()
+
+                    # print(pos , read.query_name, r1_or_r2)
+                    # print(read_pos,read.query_sequence, read.query_length)
+
+                    ## 这里要考虑 前后有hard clip 的情况
+                    adjust_pos = adjust_for_hard_clip(read, read_pos)
+
+                    # print(adjust_pos)
+
+                    read_base_at_position = read.query_sequence[adjust_pos].upper()
+                    # print([read.query_name, r1_or_r2, read_pos, ref_base_at_position, read_base_at_position])
+
+                    # read_base_at_position = read.query_sequence[read_pos-1].upper() if not read.is_reverse else read.query_sequence[read.query_length - read_pos ].upper()
                     # print(f'{read.query_name},{r1_or_r2},{read_pos}')
                     reads.append([read.query_name, r1_or_r2, read_pos, ref_base_at_position, read_base_at_position])
 

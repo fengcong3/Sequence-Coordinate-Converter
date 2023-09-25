@@ -59,6 +59,11 @@ def get_new_pos_by_readname(bam2_path, ref2, bri_instance, reads_name):
         for read in samfile:
             read_name = read.query_name
             r1_or_r2 = 'R1' if read.is_read1 else 'R2'
+
+            ## 如果比对质量太低，或者是supplementary alignment，就跳过
+            if read.mapping_quality < 1 or read.is_supplementary or "SA" in dict(read.tags):
+                continue
+
             if (read_name, r1_or_r2) in reads_dict:
                 pos = reads_dict[(read_name, r1_or_r2)][0]
                 # Compute the chromosome and position in the new reference sequence
@@ -67,10 +72,14 @@ def get_new_pos_by_readname(bam2_path, ref2, bri_instance, reads_name):
 
                 ## 会出现supplementary alignment 的情况，这种情况下，
                 ## 会有两条record，一条是主要的，一条是supplementary的
-                ## 那么有一条 就不会有位置
+                ## 那么有一条 就不会有位置？
                 if new_ref_pos is None: ## 如果没找到位置，就跳过
                     continue
-
+                # print(read_name, r1_or_r2)
+                # print(reads_dict[(read_name, r1_or_r2)])
+                # print(pos, new_ref_pos)
+                # print(read.query_sequence, read.query_length)
+                # print(pos-1, read.query_length - pos)
                 # 获取某个染色体(chr1)上第1000个位置（0-based）的碱基
                 ref_base_at_position = fasta.fetch(chromosome, new_ref_pos-1, new_ref_pos).upper()
                 read_base_at_position = read.query_sequence[pos-1].upper() if not read.is_reverse else read.query_sequence[read.query_length - pos ].upper()

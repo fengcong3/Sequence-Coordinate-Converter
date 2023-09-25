@@ -71,6 +71,7 @@ def main():
         ## 做出判断决策
         final_res=make_decision(update_res)
         write_res1(snp, final_res, outf)
+        print(snp)
 
     close_res_file(outf)
 
