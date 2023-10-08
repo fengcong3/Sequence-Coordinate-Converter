@@ -29,6 +29,33 @@ from .input_output_handler import read_SNP_file, write_res1, open_res_file, clos
 import bri
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+
+
+def process_snp(snp, args, bri_instance, outf, write_lock):
+    ## get position of reads on reference1 
+    res = get_reads_by_pos(args.bam1, args.ref1, snp)
+    ## 注意判断是否为空列表,如果为空列表，就跳过
+    if len(res) == 0:
+        sys.stderr.write("No reads cover this position: %s\n" % snp)
+        return
+
+    ## get new position on reference2
+    update_res = get_new_pos_by_readname(args.bam2, args.ref2, bri_instance, res)
+    if len(update_res) == 0:
+        sys.stderr.write("reads cant find in ref2 or all unmmaped: %s\n" % snp)
+        return
+
+    ## 做出判断决策
+    final_res = make_decision(update_res)
+    with write_lock:
+        write_res1(snp, final_res, outf)
+        print(snp)
+
+def snp_generator(snp_list):
+    for snp in snp_list:
+        yield snp
 
 def main():
     ## 输出时间，用于计算运行时间
@@ -38,40 +65,35 @@ def main():
     args = get_args_and_check_file()
 
     ## make the bri module ready, waiting for the read name that needed query
-    # bam2="/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1//01.cram_of_CS2/CS/CS2.merge.sortn.bam"
-    # ref2="/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/01.cram_of_CS2/CS/CS_V2.1.cut.norm.fa"
     bri_instance = bri.initialize_bri(args.bam2, args.bam2+".bri")
 
     ## 输出时间，用于计算运行时间
     sys.stderr.write("BRI module ready, time: %s\n" % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
 
     outf = open_res_file(args.outprefix)
+    write_lock = threading.Lock()
 
     ## get snp position
     # snp_file = "/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/06.small_batch_test/pipeline/test.txt"
     snp_list = read_SNP_file(args.snp)
 
-    ## traverse each SNP
-    # bam_file_path = "/vol3/agis/chengshifeng_group/fengcong/zz.my_jupyter_notebook/zz.CS1toCS2.1/00.cram_of_CS1/merge.rmdup.Chinese_Spring.cram"
-    # ref1="/public/agis/chengshifeng_group/fengcong/WGRS/graduation_project/00.var_genome/161010_Chinese_Spring_v1.0_pseudomolecules_parts.fasta"
-    for snp in snp_list:
-        ## get position of reads on reference1 
-        res=get_reads_by_pos(args.bam1, args.ref1, snp)
-        ## 注意判断是否为空列表,如果为空列表，就跳过
-        if len(res) == 0:
-            sys.stderr.write("No reads cover this position: %s\n" % snp)
-            continue
+    # 获取线程数
+    num_threads = args.thread
 
-        ## get new position on reference2
-        update_res = get_new_pos_by_readname(args.bam2, args.ref2, bri_instance, res)
-        if len(update_res) == 0:
-            sys.stderr.write("reads cant find in ref2 or all unmmaped: %s\n" % snp)
-            continue
 
-        ## 做出判断决策
-        final_res=make_decision(update_res)
-        write_res1(snp, final_res, outf)
-        print(snp)
+    # 初始化ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        # 使用生成器
+        tasks = {executor.submit(process_snp, snp, args, bri_instance, outf, write_lock): snp for snp in snp_generator(snp_list)}
+        
+        # 通过as_completed获取完成的任务
+        # for future in as_completed(tasks):
+        #     snp = tasks[future]
+        #     try:
+        #         future.result()
+        #     except Exception as e:
+        #         print(f"SNP {snp} generated an exception: {e}")
+
 
     close_res_file(outf)
 

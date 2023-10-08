@@ -6,9 +6,9 @@ def get_args_and_check_file():
         description="SequenceCoordinateConverter (SCC) / fengcong@caas.cn" 
         )
     cmdparser.add_argument("-b","--bam1", dest="bam1",type=str, required=True,
-        help="Bam file of reference 1")
+        help="Bam/cram file of reference 1")
     cmdparser.add_argument("-B","--bam2", dest="bam2",type=str, required=True,
-        help="Bam/cram file of reference 2")
+        help="Bam file of reference 2")
     cmdparser.add_argument("-r","--ref1", dest="ref1",type=str, required=True,
         help="Fasta file of reference 1")
     cmdparser.add_argument("-R","--ref2", dest="ref2",type=str, required=True,
@@ -16,8 +16,8 @@ def get_args_and_check_file():
     cmdparser.add_argument("-s","--snp", dest="snp",type=str, required=True,
         help="SNP position file of reference 1, format: chr1A:100, one line one SNP")
     ## thread
-    # cmdparser.add_argument("-t","--thread", dest="thread",type=int, default=1,
-    #     help="Thread number")
+    cmdparser.add_argument("-t","--thread", dest="thread",type=int, default=1,
+        help="Thread number")
     cmdparser.add_argument("-o","--outprefix", dest="outprefix",type=str, required=True,
         help="Output prefix")
     

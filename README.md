@@ -60,8 +60,8 @@ SequenceCoordinateConverter (SCC) / fengcong@caas.cn
 
 optional arguments:
   -h, --help            show this help message and exit
-  -b BAM1, --bam1 BAM1  Bam file of reference 1
-  -B BAM2, --bam2 BAM2  Bam/cram file of reference 2
+  -b BAM1, --bam1 BAM1  Bam/cram file of reference 1
+  -B BAM2, --bam2 BAM2  Bam file of reference 2
   -r REF1, --ref1 REF1  Fasta file of reference 1
   -R REF2, --ref2 REF2  Fasta file of reference 2
   -s SNP, --snp SNP     SNP position file of reference 1, format: chr1A:100,
