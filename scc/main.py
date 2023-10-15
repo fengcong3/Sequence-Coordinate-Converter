@@ -24,7 +24,7 @@
 
 from .arg_parser import get_args_and_check_file
 from .read_pos_resolver import get_reads_by_pos
-from .ref_pos_resolver import get_new_pos_by_readname, make_decision
+from .ref_pos_resolver import get_new_pos_by_readname, get_new_pos_by_readname2, make_decision
 from .input_output_handler import read_SNP_file, write_res1, open_res_file, close_res_file
 import bri
 import sys
@@ -52,7 +52,7 @@ def process_snp(snp, args, bri_instance):
     # with write_lock:
     #     write_res1(snp, final_res, outf)
     #     print(snp)
-    # print(snp)
+    #print(snp)
     return (snp, final_res)  # 修改此处，返回结果而不是写入文件
 
 def snp_generator(snp_list):
