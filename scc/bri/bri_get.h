@@ -43,4 +43,18 @@ bam_read_idx* initialize_bri(const char* bam_file, const char* index_file);
 void query_by_readname(const char* input_bam, bam_read_idx* bri,
     char** read_names, uint64_t read_name_count, kstring_t *ks_out);
 
+// 客户端上下文结构定义
+typedef struct {
+    void *shm_addr;             // 共享内存地址
+    size_t record_count;        // 记录数量
+    char *readnames;            // readnames基地址
+    bam_read_idx_record *records; // 共享内存中的records位置
+} client_context_t;
+
+// 从客户端上下文中获取指定索引的readname
+const char* get_record_readname(client_context_t *ctx, size_t index);
+
+// 使用直接访问模式搜索记录
+int direct_search_record_by_name(client_context_t *ctx, const char *readname, size_t *start_idx, size_t *end_idx);
+
 #endif

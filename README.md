@@ -53,8 +53,8 @@ bri index alignment2_namesort.bam
 e. Use `SCC` for position conversion.
 
 ```bash
-$ SCC -h
-usage: SCC [-h] -b BAM1 -B BAM2 -r REF1 -R REF2 -s SNP -o OUTPREFIX
+$ SCC convert -h
+usage: SCC convert [-h] -b BAM1 -B BAM2 -r REF1 -R REF2 -s SNP [-t THREAD] -o OUTPREFIX [--use-server]
 
 SequenceCoordinateConverter (SCC) / fengcong@caas.cn
 
@@ -66,11 +66,42 @@ optional arguments:
   -R REF2, --ref2 REF2  Fasta file of reference 2
   -s SNP, --snp SNP     SNP position file of reference 1, format: chr1A:100,
                         one line one SNP
+  -t THREAD, --thread THREAD
+                        Thread number
   -o OUTPREFIX, --outprefix OUTPREFIX
                         Output prefix
+  --use-server          Try to use server mode if available
 ```
 
-### 2. Coordinate Conversion Between Different Species or Closely Related Species
+### 2. Server Mode for High-throughput Processing
+
+When processing thousands of tasks that use the same reference files, loading the index for each task wastes memory and time. SCC now includes a server mode that loads the index once and shares it through shared memory.
+
+a. Start the server:
+
+```bash
+SCC server -B alignment2_namesort.bam
+```
+
+You can also run it as a daemon in the background:
+
+```bash
+SCC server -B alignment2_namesort.bam -d
+```
+
+b. Run conversion tasks with the `--use-server` flag:
+
+```bash
+SCC convert -b alignment1_sorted.bam -B alignment2_namesort.bam -r reference1.fa -R reference2.fa -s positions.txt -o output --use-server
+```
+
+c. When finished, stop the server:
+
+```bash
+SCC stop-server
+```
+
+### 3. Coordinate Conversion Between Different Species or Closely Related Species
 
 a. Choose the reads of either `reference1` or `reference2` and align them to both references using `bwa mem`.
 
@@ -98,9 +129,6 @@ The `code` field is used to describe the relationship between `Ref1` and `Ref2` 
 - `1`: Change in assembly orientation between `Ref1` and `Ref2` at this position.
 - `2`: Difference in assembly between `Ref1` and `Ref2` at this position, but the orientation remains unchanged.
 - `3`: Difference in assembly between `Ref1` and `Ref2` at this position, and the orientation has also changed.
-
-
-
 
 ## Discussion
 

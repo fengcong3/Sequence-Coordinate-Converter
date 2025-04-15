@@ -31,9 +31,21 @@ genome2_processor_cext = Extension(
     libraries=['pthread', 'z', 'm', 'lzma', 'hts']
 )
 
+# 如果有额外的包含路径，确保添加进去
+ext_modules = [
+    Extension('scc.bri.bri',
+              sources=['scc/bri/py_bri_wrapper.c', 'scc/bri/bri_index.c', 'scc/bri/bri_get.c'],
+              include_dirs=['/public/agis/chengshifeng_group/fengcong/WGRS/software/htslib-1.18/install_08284/include/'],
+              libraries=['hts'],
+              library_dirs=['/public/agis/chengshifeng_group/fengcong/WGRS/software/htslib-1.18/install_08284/lib/'],
+              extra_compile_args=['-O3', '-std=c99', '-fsigned-char', 
+                                 '-D_FILE_OFFSET_BITS=64', '-g', '-fPIC']
+             )
+]
+
 setup(
     name='SequenceCoordinateConverter',
-    version='0.2',
+    version='0.3',  # 更新版本号
     packages=find_packages(),
     install_requires=[
         'pysam',
