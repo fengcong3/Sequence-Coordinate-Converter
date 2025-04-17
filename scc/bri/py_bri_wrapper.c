@@ -37,7 +37,6 @@ typedef struct {
     int magic_number;           // 魔数，用于验证共享内存结构的有效性
     char bam_path[1024];        // bam文件路径
     int new_approach;           // 标记使用新方法，避免与旧版本冲突
-    int direct_access_mode;     // 标记使用直接访问模式
 } shm_header_t;
 
 #define SHM_MAGIC_NUMBER 0x42524953  // "BRIS" in ASCII
@@ -102,10 +101,10 @@ void* setup_direct_access_mode(void *shm_addr) {
     // 获取共享内存中的各部分地址
     char *readnames = (char *)shm_addr + header->readnames_offset;
     bam_read_idx_record *records = (bam_read_idx_record *)((char *)shm_addr + header->records_offset);
-    bam_read_idx *bri = (bam_read_idx *)((char *)shm_addr + header->bri_offset);
+    bam_read_idx *shm_bri = (bam_read_idx *)((char *)shm_addr + header->bri_offset);
     
     debug_log("Shared memory layout: bri=%p, readnames=%p, records=%p", 
-              bri, readnames, records);
+              shm_bri, readnames, records);
     debug_log("Header info: name_count=%zu, record_count=%zu", 
               header->name_count_bytes, header->record_count);
     
@@ -122,22 +121,33 @@ void* setup_direct_access_mode(void *shm_addr) {
     ctx->readnames = readnames;
     ctx->records = records;
     
-    // 设置bri结构
-    bri->readnames = readnames;
-    bri->name_count_bytes = header->name_count_bytes;
-    bri->record_count = header->record_count;
+    // 创建客户端本地BRI副本，而非修改共享内存中的BRI
+    bam_read_idx *local_bri = (bam_read_idx *)malloc(sizeof(bam_read_idx));
+    if (!local_bri) {
+        debug_log("ERROR: Failed to allocate memory for local BRI");
+        free(ctx);
+        return NULL;
+    }
     
-    // 重要：将bri->records指向我们的上下文，这样search函数可以通过它来访问
-    bri->records = (bam_read_idx_record*)ctx;
+    // 复制BRI结构到本地
+    memcpy(local_bri, shm_bri, sizeof(bam_read_idx));
     
-    // 修改header标记使用直接访问模式
-    header->direct_access_mode = 1;
+    // 设置本地BRI的指针，不修改共享内存
+    local_bri->readnames = readnames;
+    local_bri->name_count_bytes = header->name_count_bytes;
+    local_bri->record_count = header->record_count;
     
-    debug_log("Direct access mode setup completed");
+    // 重要：将local_bri->records指向我们的上下文，而不是修改共享内存
+    local_bri->records = (bam_read_idx_record*)ctx;
+    
+    // 保存本地BRI指针到上下文中，方便后续管理
+    ctx->local_bri = local_bri;
+    
+    debug_log("Direct access mode setup completed with local BRI at %p", local_bri);
     return ctx;
 }
 
-// 修改连接到共享内存的函数，使用直接访问模式
+// 修改连接到共享内存的函数，使用本地BRI结构
 static PyObject* py_connect_to_server(PyObject *self, PyObject *args)
 {
     const char *bam_file;
@@ -198,27 +208,6 @@ static PyObject* py_connect_to_server(PyObject *self, PyObject *args)
     
     debug_log("Attached to shared memory at %p", shm_addr);
     
-    // 获取头部信息
-    shm_header_t *header = (shm_header_t *)shm_addr;
-    
-    // 验证魔数
-    if (header->magic_number != SHM_MAGIC_NUMBER) {
-        debug_log("Invalid magic number: %x (expected %x)", header->magic_number, SHM_MAGIC_NUMBER);
-        shmdt(shm_addr);
-        Py_RETURN_NONE;
-    }
-    
-    debug_log("Magic number verified");
-    
-    // 验证BAM文件路径是否匹配
-    if (strcmp(header->bam_path, bam_file) != 0) {
-        debug_log("BAM file mismatch: '%s' vs '%s'", header->bam_path, bam_file);
-        shmdt(shm_addr);
-        Py_RETURN_NONE;
-    }
-    
-    debug_log("BAM file path verified");
-    
     // 在验证共享内存结构之前，使用直接访问模式
     void *client_ctx = setup_direct_access_mode(shm_addr);
     
@@ -228,8 +217,9 @@ static PyObject* py_connect_to_server(PyObject *self, PyObject *args)
         Py_RETURN_NONE;
     }
     
-    // 获取bri结构体指针
-    bam_read_idx *bri = (bam_read_idx *)((char *)shm_addr + header->bri_offset);
+    // 获取客户端上下文中的本地BRI，而不是使用共享内存中的BRI
+    client_context_t *ctx = (client_context_t*)client_ctx;
+    bam_read_idx *local_bri = ctx->local_bri;
     
     // 验证设置是否成功
     debug_log("Validating direct access setup...");
@@ -240,9 +230,8 @@ static PyObject* py_connect_to_server(PyObject *self, PyObject *args)
     
     for (size_t i = 0; i < sizeof(check_points)/sizeof(check_points[0]); i++) {
         size_t idx = check_points[i];
-        if (idx >= header->record_count) continue;
+        if (idx >= ctx->record_count) continue;
         
-        client_context_t *ctx = (client_context_t*)bri->records;
         const char *name = get_record_readname(ctx, idx);
         
         if (!name) {
@@ -256,6 +245,7 @@ static PyObject* py_connect_to_server(PyObject *self, PyObject *args)
     
     if (!validation_passed) {
         debug_log("CRITICAL: Direct access validation failed, detaching from shared memory");
+        free(ctx->local_bri);
         free(client_ctx);
         shmdt(shm_addr);
         Py_RETURN_NONE;
@@ -263,13 +253,14 @@ static PyObject* py_connect_to_server(PyObject *self, PyObject *args)
         debug_log("Direct access validation passed!");
     }
     
-    // 创建返回值
+    // 创建返回值 - 返回本地BRI指针而非共享内存中的BRI
     PyObject *shm_addr_obj = PyLong_FromVoidPtr(shm_addr);
-    PyObject *bri_ptr_obj = PyLong_FromVoidPtr(bri);
+    PyObject *bri_ptr_obj = PyLong_FromVoidPtr(local_bri);  // 返回本地BRI指针
     PyObject *ctx_obj = PyLong_FromVoidPtr(client_ctx);
     
     if (!shm_addr_obj || !bri_ptr_obj || !ctx_obj) {
         debug_log("ERROR: Failed to create Python objects");
+        free(ctx->local_bri);
         free(client_ctx);
         shmdt(shm_addr);
         Py_XDECREF(shm_addr_obj);
@@ -278,7 +269,7 @@ static PyObject* py_connect_to_server(PyObject *self, PyObject *args)
         Py_RETURN_NONE;
     }
     
-    // 返回三个值：共享内存地址、bri指针和客户端上下文
+    // 返回三个值：共享内存地址、本地BRI指针和客户端上下文
     PyObject *result = PyTuple_New(3);
     PyTuple_SetItem(result, 0, shm_addr_obj);
     PyTuple_SetItem(result, 1, bri_ptr_obj);
@@ -306,34 +297,21 @@ static PyObject* py_disconnect_from_server(PyObject *self, PyObject *args)
     
     debug_log("Disconnecting from server, shm_addr=%p", shm_addr);
     
-    // 获取BRI结构
-    shm_header_t *header = (shm_header_t *)shm_addr;
-    bam_read_idx *bri = (bam_read_idx *)((char *)shm_addr + header->bri_offset);
-    
     // 释放客户端上下文
     if (ctx_obj != NULL) {
-        void *client_ctx = PyLong_AsVoidPtr(ctx_obj);
+        client_context_t *client_ctx = PyLong_AsVoidPtr(ctx_obj);
         if (client_ctx != NULL) {
             debug_log("Freeing client context at %p", client_ctx);
             
-            // 检查bri->records是否指向客户端上下文（在direct_access模式下是这种情况）
-            if (bri && bri->records == (bam_read_idx_record*)client_ctx) {
-                debug_log("Detected that bri->records points to client context, setting to NULL to avoid double free");
-                bri->records = NULL; // 避免double free
+            // 首先释放本地BRI
+            if (client_ctx->local_bri != NULL) {
+                debug_log("Freeing local BRI at %p", client_ctx->local_bri);
+                free(client_ctx->local_bri);
+                client_ctx->local_bri = NULL;
             }
             
+            // 然后释放上下文
             free(client_ctx);
-        }
-    }
-    
-    // 释放本地记录数组，但只有在它不是客户端上下文的情况下
-    if (bri && bri->records) {
-        // 检查bri->records是否指向共享内存外部的地址
-        bam_read_idx_record *shm_records = (bam_read_idx_record *)((char *)shm_addr + header->records_offset);
-        if (bri->records != shm_records) {
-            debug_log("Freeing local records array at %p", bri->records);
-            free(bri->records);
-            bri->records = NULL;
         }
     }
     
@@ -551,9 +529,6 @@ static PyObject* py_create_server(PyObject *self, PyObject *args)
             shm_records[i].file_offset = bri->records[i].file_offset;
         }
     }
-    
-    // 重建共享内存中的指针关系
-    // rebuild_pointers_in_shm(shm_addr);
     
     // 验证共享内存中的结构
     validate_shm_structures(shm_addr);

@@ -49,6 +49,7 @@ typedef struct {
     size_t record_count;        // 记录数量
     char *readnames;            // readnames基地址
     bam_read_idx_record *records; // 共享内存中的records位置
+    bam_read_idx *local_bri;    // 本地BRI结构副本 - 新增字段
 } client_context_t;
 
 // 从客户端上下文中获取指定索引的readname

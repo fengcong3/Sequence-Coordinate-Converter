@@ -34,12 +34,25 @@ import signal
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 import atexit
+import tempfile
+import uuid
 
 # 全局变量，用于服务器模式
 shm_id = None
 shm_addr = None
 bri_instance_ptr = None
 client_ctx_ptr = None  # 添加客户端上下文指针
+client_id = None  # 添加客户端ID
+
+# 添加互斥锁，保护共享内存连接过程
+shm_connect_lock = threading.Lock()
+
+# 定义共享内存键值文件路径常量
+SHM_KEY_PATH = "/tmp/scc_shm_key"
+SHM_SIZE_PATH = "/tmp/scc_shm_size"
+SHM_SEMAPHORE_PATH = "/tmp/scc_shm_sem"
+SHM_CLIENT_COUNT_PATH = "/tmp/scc_client_count"
+SHM_CLIENT_PID_DIR = "/tmp/scc_client_pids"  # 新增：客户端PID文件目录
 
 def process_snp(snp, args, bri_instance):
     ## get position of reads on reference1 
@@ -107,20 +120,134 @@ def cleanup_server():
         # 如果是因为异常或者信号导致退出，可能会执行多次cleanup
         # 忽略错误信息避免在日志中出现多余错误
         bri.stop_server()
+        
+        # 清理所有临时文件
+        for path in [SHM_KEY_PATH, SHM_SIZE_PATH, SHM_SEMAPHORE_PATH, SHM_CLIENT_COUNT_PATH]:
+            if os.path.exists(path):
+                try:
+                    os.unlink(path)
+                except:
+                    pass
+        
+        # 清理客户端PID目录
+        if os.path.exists(SHM_CLIENT_PID_DIR):
+            try:
+                for pid_file in os.listdir(SHM_CLIENT_PID_DIR):
+                    try:
+                        os.unlink(os.path.join(SHM_CLIENT_PID_DIR, pid_file))
+                    except:
+                        pass
+                os.rmdir(SHM_CLIENT_PID_DIR)
+            except:
+                pass
+                
         sys.stderr.write("Server stopped, shared memory cleaned up.\n")
     except Exception as e:
         # 只在调试模式下或在非正常退出时打印详细错误
         if str(e) != "Server not running or already stopped":
             sys.stderr.write(f"Error stopping server: {e}\n")
 
+def create_client_pid_file(client_id):
+    """创建客户端PID文件"""
+    # 确保PID目录存在
+    if not os.path.exists(SHM_CLIENT_PID_DIR):
+        try:
+            os.mkdir(SHM_CLIENT_PID_DIR, mode=0o777)
+        except Exception as e:
+            sys.stderr.write(f"Warning: Failed to create PID directory: {e}\n")
+            return
+    
+    # 写入PID文件
+    pid_file_path = os.path.join(SHM_CLIENT_PID_DIR, f"scc_client_{client_id}.pid")
+    try:
+        with open(pid_file_path, 'w') as f:
+            f.write(f"{os.getpid()},{time.time()}")
+    except Exception as e:
+        sys.stderr.write(f"Warning: Failed to create PID file: {e}\n")
+
+def remove_client_pid_file(client_id):
+    """删除客户端PID文件"""
+    pid_file_path = os.path.join(SHM_CLIENT_PID_DIR, f"scc_client_{client_id}.pid")
+    if os.path.exists(pid_file_path):
+        try:
+            os.unlink(pid_file_path)
+        except Exception as e:
+            sys.stderr.write(f"Warning: Failed to remove PID file: {e}\n")
+
+def check_client_pids_and_update_count():
+    """检查客户端PID文件，更新客户端计数"""
+    if not os.path.exists(SHM_CLIENT_PID_DIR):
+        return
+        
+    active_clients = 0
+    inactive_clients = 0
+    
+    # 检查所有PID文件
+    for pid_file in os.listdir(SHM_CLIENT_PID_DIR):
+        pid_file_path = os.path.join(SHM_CLIENT_PID_DIR, pid_file)
+        try:
+            with open(pid_file_path, 'r') as f:
+                content = f.read().strip()
+                pid_str, _ = content.split(',', 1)
+                pid = int(pid_str)
+                
+                # 检查进程是否存在
+                try:
+                    # 发送信号0检查进程是否存在
+                    os.kill(pid, 0)
+                    active_clients += 1
+                except OSError:
+                    # 进程不存在，删除PID文件
+                    inactive_clients += 1
+                    os.unlink(pid_file_path)
+        except Exception as e:
+            sys.stderr.write(f"Warning: Error processing PID file {pid_file}: {e}\n")
+            try:
+                os.unlink(pid_file_path)
+            except:
+                pass
+    
+    # 更新客户端计数
+    if inactive_clients > 0:
+        try:
+            with open(SHM_CLIENT_COUNT_PATH, 'r') as f:
+                count = int(f.read().strip() or "0")
+            
+            # 确保计数不会变为负数
+            count = max(0, count - inactive_clients)
+            
+            with open(SHM_CLIENT_COUNT_PATH, 'w') as f:
+                f.write(str(count))
+                
+            sys.stderr.write(f"Updated client count: removed {inactive_clients} inactive clients, {active_clients} active clients remain\n")
+        except Exception as e:
+            sys.stderr.write(f"Warning: Failed to update client count: {e}\n")
+
 def disconnect_from_shared_memory():
     """从共享内存断开连接"""
-    global shm_addr, client_ctx_ptr
+    global shm_addr, client_ctx_ptr, client_id
     if shm_addr is not None:
         try:
             sys.stderr.write(f"Disconnecting from shared memory at address {shm_addr}\n")
             # 传递客户端上下文以便释放
             bri.disconnect_from_server(shm_addr, client_ctx_ptr)
+            
+            # 更新客户端计数
+            try:
+                if os.path.exists(SHM_CLIENT_COUNT_PATH):
+                    with open(SHM_CLIENT_COUNT_PATH, 'r') as f:
+                        count = int(f.read().strip() or "0")
+                    
+                    if count > 0:
+                        with open(SHM_CLIENT_COUNT_PATH, 'w') as f:
+                            f.write(str(count - 1))
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to update client count: {e}\n")
+            
+            # 删除客户端PID文件
+            if 'client_id' in globals():
+                remove_client_pid_file(client_id)
+                
             shm_addr = None
             client_ctx_ptr = None
         except Exception as e:
@@ -142,18 +269,18 @@ def run_server(args):
     sys.stderr.write("Starting server mode...\n")
     
     # 先检查是否已有服务器在运行
-    key_path = "/tmp/scc_shm_key"
-    size_path = "/tmp/scc_shm_size"
-    if os.path.exists(key_path) or os.path.exists(size_path):
+    if os.path.exists(SHM_KEY_PATH) or os.path.exists(SHM_SIZE_PATH):
         sys.stderr.write("Warning: Previous server session detected. Cleaning up...\n")
         try:
             cleanup_server()
         except Exception:
             # 如果清理失败，可能需要手动删除文件
-            if os.path.exists(key_path):
-                os.unlink(key_path)
-            if os.path.exists(size_path):
-                os.unlink(size_path)
+            for path in [SHM_KEY_PATH, SHM_SIZE_PATH, SHM_SEMAPHORE_PATH, SHM_CLIENT_COUNT_PATH]:
+                if os.path.exists(path):
+                    try:
+                        os.unlink(path)
+                    except:
+                        pass
     
     # 如果需要，变成守护进程
     if args.daemonize:
@@ -172,12 +299,41 @@ def run_server(args):
         sys.stderr.write(f"Loading index from {args.bam2}...\n")
         shm_id = bri.create_server(args.bam2, args.bam2+".bri")
         
+        # 为客户端创建一个信号量文件
+        with open(SHM_SEMAPHORE_PATH, 'w') as f:
+            f.write(str(uuid.uuid4()))
+            
+        # 初始化客户端计数文件
+        with open(SHM_CLIENT_COUNT_PATH, 'w') as f:
+            f.write("0")
+            
+        # 创建客户端PID目录
+        if not os.path.exists(SHM_CLIENT_PID_DIR):
+            try:
+                os.mkdir(SHM_CLIENT_PID_DIR, mode=0o777)
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to create PID directory: {e}\n")
+            
         sys.stderr.write(f"Server started with shared memory ID: {shm_id}\n")
         sys.stderr.write("Press Ctrl+C to stop server.\n")
-        
+        #清楚缓存
+        sys.stdout.flush()
+        sys.stderr.flush()
+
         # 保持程序运行
         while True:
-            time.sleep(60)
+            time.sleep(10)
+            
+            # 定期检查客户端PID并更新计数
+            check_client_pids_and_update_count()
+            
+            # 定期检查客户端计数
+            try:
+                with open(SHM_CLIENT_COUNT_PATH, 'r') as f:
+                    count = int(f.read().strip() or "0")
+                sys.stderr.write(f"Currently connected clients: {count}\n")
+            except Exception as e:
+                sys.stderr.write(f"Warning: Failed to read client count: {e}\n")
     
     except Exception as e:
         sys.stderr.write(f"Error in server mode: {e}\n")
@@ -188,7 +344,7 @@ def stop_server():
     """停止服务器模式"""
     try:
         # 尝试获取key文件路径
-        key_path = "/tmp/scc_shm_key"
+        key_path = SHM_KEY_PATH
         if not os.path.exists(key_path):
             sys.stderr.write("Server is not running.\n")
             return
@@ -222,7 +378,7 @@ def stop_server():
 
 def run_convert(args):
     """运行坐标转换"""
-    global shm_addr, bri_instance_ptr, client_ctx_ptr
+    global shm_addr, bri_instance_ptr, client_ctx_ptr, client_id
     
     start_time = time.time()
     sys.stderr.write("Start time: %s\n" % time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time)))
@@ -232,42 +388,125 @@ def run_convert(args):
     # 如果启用了服务器模式，尝试连接
     if hasattr(args, 'use_server') and args.use_server:
         sys.stderr.write("Attempting to connect to server...\n")
-        try:
-            result = bri.connect_to_server(args.bam2)
-            if result is not None and len(result) >= 3:
-                shm_addr, bri_instance_ptr, client_ctx_ptr = result
-                bri_instance = bri_instance_ptr
-                # 注册退出时断开连接
-                atexit.register(disconnect_from_shared_memory)
-                sys.stderr.write(f"Connected to server successfully. SHM address: {shm_addr}, BRI pointer: {bri_instance_ptr}, Context pointer: {client_ctx_ptr}\n")
+        
+        # 使用互斥锁保护连接过程
+        with shm_connect_lock:
+            # 检查服务器是否在运行
+            if not os.path.exists(SHM_KEY_PATH) or not os.path.exists(SHM_SEMAPHORE_PATH):
+                sys.stderr.write("Error: Server is not running. Please start the server first.\n")
+                sys.exit(1)
                 
-                # 安全检查 - 验证BRI结构
+            # 添加重试机制
+            max_retries = 3
+            retry_count = 0
+            
+            while retry_count < max_retries:
                 try:
-                    # 检查BRI指针是否还是有效的
-                    sys.stderr.write(f"Validating BRI structure at {bri_instance}...\n")
+                    # 记录尝试次数
+                    retry_count += 1
+                    sys.stderr.write(f"Connection attempt {retry_count}/{max_retries}...\n")
                     
-                    # 增强型测试 - 检查是否能够执行一次简单查询
-                    test_read_name = "test_dummy_read"
-                    sys.stderr.write(f"Testing with read name: {test_read_name}\n")
-                    test_result = bri.query_by_readname(args.bam2, bri_instance, [test_read_name])
-                    sys.stderr.write(f"BRI validation test completed successfully\n")
+                    # 使用唯一客户端ID
+                    client_id = str(uuid.uuid4())
+                    
+                    # 生成临时客户端信号量文件
+                    client_semaphore_path = f"/tmp/scc_client_{client_id}"
+                    with open(client_semaphore_path, 'w') as f:
+                        f.write(client_id)
+                    
+                    # 尝试连接
+                    result = bri.connect_to_server(args.bam2)
+                    
+                    # 清理临时客户端信号量文件
+                    try:
+                        os.unlink(client_semaphore_path)
+                    except:
+                        pass
+                    
+                    if result is not None and len(result) >= 3:
+                        shm_addr, bri_instance_ptr, client_ctx_ptr = result
+                        bri_instance = bri_instance_ptr
+                        
+                        # 注册退出时断开连接
+                        atexit.register(disconnect_from_shared_memory)
+                        sys.stderr.write(f"Connected to server successfully. SHM address: {shm_addr}, BRI pointer: {bri_instance_ptr}, Context pointer: {client_ctx_ptr}\n")
+                        
+                        # 创建客户端PID文件
+                        create_client_pid_file(client_id)
+                        
+                        # 更新客户端计数
+                        try:
+                            with open(SHM_CLIENT_COUNT_PATH, 'r') as f:
+                                count = int(f.read().strip() or "0")
+                            with open(SHM_CLIENT_COUNT_PATH, 'w') as f:
+                                f.write(str(count + 1))
+                        except Exception as e:
+                            sys.stderr.write(f"Warning: Failed to update client count: {e}\n")
+                        
+                        # 安全检查 - 验证BRI结构
+                        try:
+                            # 检查BRI指针是否还是有效的
+                            sys.stderr.write(f"Validating BRI structure at {bri_instance}...\n")
+                            
+                            # 增强型测试 - 检查是否能够执行一次简单查询
+                            test_read_name = f"test_client_{client_id}"
+                            sys.stderr.write(f"Testing with read name: {test_read_name}\n")
+                            test_result = bri.query_by_readname(args.bam2, bri_instance, [test_read_name])
+                            sys.stderr.write(f"BRI validation test completed successfully\n")
+                            break  # 成功连接和验证，退出重试循环
+                        except Exception as e:
+                            sys.stderr.write(f"ERROR: BRI validation test failed: {str(e)}\n")
+                            sys.stderr.write("Disconnecting and trying again...\n")
+                            
+                            # 断开当前连接
+                            disconnect_from_shared_memory()
+                            bri_instance = None
+                            
+                            # 如果是最后一次尝试，则切换到直接加载模式
+                            if retry_count >= max_retries:
+                                sys.stderr.write("Falling back to direct index loading\n")
+                                break
+                            
+                            # 短暂延时后重试
+                            time.sleep(0.5)
+                    else:
+                        sys.stderr.write(f"Failed to connect to server on attempt {retry_count}.\n")
+                        
+                        # 如果是最后一次尝试，则切换到直接加载模式
+                        if retry_count >= max_retries:
+                            sys.stderr.write("Will load index directly.\n")
+                            break
+                        
+                        # 短暂延时后重试
+                        time.sleep(0.5)
                 except Exception as e:
-                    sys.stderr.write(f"ERROR: BRI validation test failed: {str(e)}\n")
-                    sys.stderr.write("Falling back to direct index loading\n")
-                    bri_instance = None
-                    disconnect_from_shared_memory()
-            else:
-                sys.stderr.write("Failed to connect to server. Will load index directly.\n")
-        except Exception as e:
-            sys.stderr.write(f"Error connecting to server: {str(e)}\n")
-            sys.stderr.write("Will load index directly.\n")
-            # 确保断开共享内存连接，避免内存泄露
-            if shm_addr is not None:
-                try:
-                    disconnect_from_shared_memory()
-                except:
-                    pass
-    
+                    sys.stderr.write(f"Error during connection attempt {retry_count}: {str(e)}\n")
+                    
+                    # 清理临时客户端信号量文件
+                    try:
+                        if 'client_semaphore_path' in locals():
+                            os.unlink(client_semaphore_path)
+                    except:
+                        pass
+                    
+                    # 确保断开共享内存连接，避免内存泄露
+                    if shm_addr is not None:
+                        try:
+                            disconnect_from_shared_memory()
+                        except:
+                            pass
+                        
+                    # 如果是最后一次尝试，则切换到直接加载模式
+                    if retry_count >= max_retries:
+                        sys.stderr.write("Falling back to direct index loading\n")
+                        break
+                    
+                    # 短暂延时后重试
+                    time.sleep(0.5)
+    # 清除缓存
+    sys.stdout.flush()
+    sys.stderr.flush()
+
     # 如果没有连接到服务器，或者不使用服务器模式，则常规加载索引
     if bri_instance is None:
         sys.stderr.write("Loading index directly...\n")
