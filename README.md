@@ -44,7 +44,7 @@ c. Sort the alignment file for `reference2` based on the read name.
 samtools sort -n -o alignment2_namesort.bam -O bam alignment2.sam
 ```
 
-d. Use `bri` to index the sorted `alignment2`.
+d. Use `bri` (https://github.com/jts/bri) to index the sorted `alignment2`.
 
 ```bash
 bri index alignment2_namesort.bam
